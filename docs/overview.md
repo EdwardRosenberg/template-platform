@@ -118,9 +118,11 @@ When the style guide changes, all sections get updated automatically, and all fu
 
 ## Next Steps
 
-- [Using Templates](./using-templates.md) - How to create new projects
-- [Sync Rules](./sync-rules.md) - What files are synchronized
-- [Running Sync](../tools/README.md) - How to propagate updates
+For more detailed information, refer to these guides (coming soon):
+
+- **Using Templates** - How to create new projects from leaf templates
+- **Sync Rules** - What files are synchronized and what's excluded
+- **Running Sync** - How to propagate updates from base to leaf templates
 
 ---
 
