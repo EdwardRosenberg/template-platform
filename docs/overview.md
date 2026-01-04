@@ -43,17 +43,15 @@ The Template Platform uses a two-tier architecture:
 ### Base Template (`template-base`)
 The **base template** is the single source of truth for shared organizational standards. It contains:
 - `.github/` - Shared GitHub Actions workflows and configurations
-- `.editorconfig` - Consistent code formatting across all projects
+- `docs/` - Standard documentation templates, such as PR title guidelines'
+- `editorconfig` - Code style conventions
 - `.gitignore` - Standard ignore patterns
-- `CODEOWNERS` - Code review requirements
-- `SECURITY.md` - Security policies and reporting procedures
-- `CONTRIBUTING.md` - Contribution guidelines
 
-The base template is **never used directly** to create projects. Instead, it serves as the foundation that all leaf templates inherit from.
+The base template is **never used directly** to create projects, besides leaf templates. Instead, it serves as the foundation that all leaf templates inherit from.
 
 ### Leaf Templates
 **Leaf templates** are technology-specific templates that extend the base template. Examples include:
-- `template-backend-spring` - For Spring Boot microservices
+- `template-backend-java-spring-boot` - For Spring Boot microservices
 - `template-frontend-react` - For React applications
 - `template-data-pipeline` - For data engineering projects
 
