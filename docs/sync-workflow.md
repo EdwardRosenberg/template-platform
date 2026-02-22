@@ -19,6 +19,16 @@ template-backend-java-spring-boot (Tier 2)
 
 Sync is **staged** — it only propagates one tier at a time. Changes in `template-base` flow to Tier 1 children first. After those PRs are reviewed and merged, another sync run propagates to Tier 2.
 
+### Branch protection compatible
+
+The sync workflow **never pushes directly to `main`**. For every child with changed files it:
+
+1. Creates a timestamped branch (`sync/from-<parent>-<timestamp>`)
+2. Commits the changed files to that branch
+3. Opens a PR targeting `main`
+
+This means it works correctly with branch protection rules that require PRs on all target repos, including `template-base`.
+
 ## `sync-config.yml` Manifest
 
 Every template (except `template-base`) declares:

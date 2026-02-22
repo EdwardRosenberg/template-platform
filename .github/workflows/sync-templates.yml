@@ -26,7 +26,16 @@ permissions:
 
 jobs:
   # ─────────────────────────────────────────────────────────────────────────────
-  # 1. Read sync-config.yml from each template and build the propagation matrix
+  # 1. Read sync-config.yml from each template and build the propagation matrix.
+  #
+  # We do NOT use `submodules: recursive` here — that would require read access
+  # to every submodule repo (including ones protected by branch rules) and would
+  # fail if a submodule hasn't been pushed to GitHub yet.
+  #
+  # Instead we:
+  #   a) Check out template-platform (no submodules) to read .gitmodules.
+  #   b) For each child repo slug found in .gitmodules, fetch sync-config.yml
+  #      directly from the GitHub Contents API using SYNC_TOKEN.
   # ─────────────────────────────────────────────────────────────────────────────
   build-matrix:
     name: Build propagation matrix
@@ -34,51 +43,62 @@ jobs:
     outputs:
       matrix: ${{ steps.build.outputs.matrix }}
     steps:
-      - name: Checkout template-platform
+      - name: Checkout template-platform (no submodules)
         uses: actions/checkout@v4
         with:
-          submodules: recursive
-          fetch-depth: 0
+          submodules: false
+          fetch-depth: 1
 
       - name: Build child→parent propagation pairs
         id: build
         env:
           SOURCE_REPO: ${{ inputs.source-repo }}
+          GH_TOKEN:    ${{ secrets.SYNC_TOKEN }}
         run: |
           set -euo pipefail
 
           PAIRS="[]"
 
-          # Walk every template submodule directory
-          for config_path in templates/*/sync-config.yml; do
-            template_dir=$(dirname "$config_path")
-            template_name=$(basename "$template_dir")
+          # Read every submodule URL from .gitmodules
+          # Output format:  submodule.<key>.url = <url>
+          while IFS= read -r line; do
+            # Extract the repo slug from the URL value
+            child_url=$(echo "$line" | awk '{print $3}')
+            child_slug=$(echo "$child_url" | sed 's|https://github.com/||;s|\.git$||')
 
-            parent=$(grep '^parent:' "$config_path" | awk '{print $2}' | tr -d '"' || true)
-            tier=$(grep '^tier:' "$config_path" | awk '{print $2}' || true)
+            echo "--- Checking $child_slug ---"
 
-            # Skip Tier 0 (no parent) and templates that don't match the source filter
+            # Fetch sync-config.yml for this child via the GitHub Contents API
+            api_url="https://api.github.com/repos/${child_slug}/contents/sync-config.yml"
+            response=$(curl -sf \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github.raw+json" \
+              "$api_url" 2>/dev/null || true)
+
+            if [ -z "$response" ]; then
+              echo "  No sync-config.yml found in $child_slug, skipping"
+              continue
+            fi
+
+            # Parse parent, tier, sync_paths from the YAML content
+            parent=$(echo "$response" | grep '^parent:' | awk '{print $2}' | tr -d '"' || true)
+            tier=$(echo "$response"   | grep '^tier:'   | awk '{print $2}' || true)
+
             if [ -z "$parent" ]; then
-              echo "Skipping $template_name (Tier 0, no parent)"
+              echo "  $child_slug has no parent (Tier 0), skipping"
               continue
             fi
 
             if [ -n "$SOURCE_REPO" ] && [ "$parent" != "$SOURCE_REPO" ]; then
-              echo "Skipping $template_name (parent $parent does not match filter $SOURCE_REPO)"
+              echo "  $child_slug parent is $parent, does not match filter '$SOURCE_REPO', skipping"
               continue
             fi
 
-            # Extract sync_paths list into a JSON array
             sync_paths=$(python3 -c "
 import yaml, json, sys
-with open('${config_path}') as f:
-    cfg = yaml.safe_load(f)
+cfg = yaml.safe_load(sys.stdin.read())
 print(json.dumps(cfg.get('sync_paths', [])))
-")
-
-            # Derive child repo slug from submodule URL in .gitmodules
-            child_url=$(git config --file .gitmodules "submodule.${template_dir}.url" || true)
-            child_slug=$(echo "$child_url" | sed 's|https://github.com/||;s|\.git$||')
+" <<< "$response")
 
             pair=$(jq -n \
               --arg parent  "$parent" \
@@ -88,8 +108,9 @@ print(json.dumps(cfg.get('sync_paths', [])))
               '{parent: $parent, child: $child, tier: ($tier | tonumber), sync_paths: $paths}')
 
             PAIRS=$(echo "$PAIRS" | jq --argjson p "$pair" '. + [$p]')
-            echo "Registered pair: $parent → $child_slug (tier $tier)"
-          done
+            echo "  Registered: $parent → $child_slug (tier $tier)"
+
+          done < <(git config --file .gitmodules --get-regexp 'submodule\..*\.url')
 
           echo "matrix={\"include\":$(echo "$PAIRS")}" >> "$GITHUB_OUTPUT"
           echo "Propagation matrix:"
@@ -168,7 +189,7 @@ print(json.dumps(cfg.get('sync_paths', [])))
         run: echo "No sync changes detected for ${{ matrix.child }}. Nothing to do."
 
       - name: Open PR with synced changes
-        if: steps.copy.outputs.changed == 'true' && inputs.dry-run != true
+        if: steps.copy.outputs.changed == 'true' && (github.event_name != 'workflow_dispatch' || inputs.dry-run != true)
         env:
           GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
           CHILD_REPO: ${{ matrix.child }}
@@ -211,7 +232,7 @@ print(json.dumps(cfg.get('sync_paths', [])))
           *Generated by \`.github/workflows/sync-templates.yml\` in \`template-platform\`.*"
 
       - name: Dry run summary
-        if: steps.copy.outputs.changed == 'true' && inputs.dry-run == true
+        if: steps.copy.outputs.changed == 'true' && github.event_name == 'workflow_dispatch' && inputs.dry-run == true
         run: |
           echo "DRY RUN — changes detected for ${{ matrix.child }}, but no PR opened."
           echo "Changed files:"
