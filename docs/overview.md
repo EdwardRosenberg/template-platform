@@ -36,31 +36,39 @@ Organizations need control over:
 
 Templates make governance enforceable and auditable across all repositories.
 
-## Base vs Leaf Templates
+## Template Hierarchy
 
-The Template Platform uses a two-tier architecture:
+The Template Platform uses a **three-tier architecture** that separates governance, stack tooling, and application scaffolding into distinct layers. For a full reference, see [docs/template-hierarchy.md](template-hierarchy.md).
 
-### Base Template (`template-base`)
-The **base template** is the single source of truth for shared organizational standards. It contains:
+### Tier 0 — Base Template (`template-base`)
+The **base template** is the single source of truth for organization-wide standards. It contains:
 - `.github/` - Shared GitHub Actions workflows and configurations
 - `.editorconfig` - Consistent code formatting across all projects
-- `.gitignore` - Standard ignore patterns
+- `.gitignore` - Common ignore patterns
 - `CODEOWNERS` - Code review requirements
 - `SECURITY.md` - Security policies and reporting procedures
 - `CONTRIBUTING.md` - Contribution guidelines
 
-The base template is **never used directly** to create projects. Instead, it serves as the foundation that all leaf templates inherit from.
+`template-base` is **never used directly** to create projects. It is the foundation that all Tier 1 stack templates inherit from.
 
-### Leaf Templates
-**Leaf templates** are technology-specific templates that extend the base template. Examples include:
-- `template-backend-spring` - For Spring Boot microservices
-- `template-frontend-react` - For React applications
-- `template-data-pipeline` - For data engineering projects
+### Tier 1 — Stack Templates
+**Stack templates** are language- or ecosystem-specific templates that extend the base template. They add build tooling and quality gates for a technology stack but remain app-agnostic. Examples:
+- `template-backend-java` - Maven wrapper, Java conventions, CI wired for Java
+- `template-frontend-react` - Node.js config, ESLint/Prettier, CI wired for Node
+- `template-data-python` - pyproject.toml, ruff/mypy, CI wired for Python
 
-Each leaf template:
-1. Inherits shared files from the base template
-2. Adds technology-specific boilerplate and configuration
-3. Can be used directly via GitHub's "Use this template" feature to create new projects
+Stack templates are **not used directly** to create application projects. They serve as parents for Tier 2 archetype templates.
+
+### Tier 2 — Archetype Templates
+**Archetype templates** extend a stack template with an opinionated, runnable application scaffold. Examples:
+- `template-backend-java-spring-boot` - Spring Boot hello-world app, Swagger setup
+- `template-frontend-react-nextjs` - Next.js scaffold with Tailwind
+- `template-data-python-fastapi` - FastAPI scaffold with example router
+
+Each archetype template:
+1. Inherits governance from `template-base` (via its stack template parent)
+2. Adds framework-specific boilerplate and a working application
+3. Can be used directly via GitHub's "Use this template" to create new projects with CI green from day one
 
 ## Why Does Sync Exist?
 
@@ -102,27 +110,31 @@ This keeps the entire ecosystem up-to-date with minimal manual effort.
 
 Think of the Template Platform as a **publishing system**:
 
-1. **Base Template** = The style guide and shared content
-2. **Leaf Templates** = Section templates (Sports, Politics, Business)
-3. **Sync** = The distribution system that pushes updates to all sections
-4. **Your Projects** = Individual articles created from the section templates
+1. **Tier 0 (`template-base`)** = The style guide and shared standards
+2. **Tier 1 (Stack Templates)** = Technology section editors (Java, React, Python)
+3. **Tier 2 (Archetype Templates)** = Ready-to-use article templates for a specific framework
+4. **Sync** = The distribution system that propagates updates down the hierarchy
+5. **Your Projects** = Individual articles created from archetype templates
 
-When the style guide changes, all sections get updated automatically, and all future articles inherit the new standards.
+When the style guide changes, all stack templates get updated automatically, and all archetype templates and projects inherit the new standards through staged propagation.
 
 ## Quick Reference
 
-- **Creating a new project**: Use a leaf template (e.g., `template-backend-spring`)
-- **Updating shared standards**: Modify the base template, then run sync
-- **Adding a new tech stack**: Create a new leaf template that inherits from base
+- **Creating a new project**: Use an archetype template (Tier 2), e.g., `template-backend-java-spring-boot`
+- **Updating shared standards**: Modify `template-base`, then run sync
+- **Adding a new tech stack**: Create a Tier 1 stack template inheriting from `template-base`
+- **Adding a new framework**: Create a Tier 2 archetype template inheriting from a stack template
+- **Understanding the hierarchy**: See [docs/template-hierarchy.md](template-hierarchy.md)
 - **Understanding what's shared**: Check the `shared_paths` in sync configuration
 
 ## Next Steps
 
-For more detailed information, refer to these guides (coming soon):
+For more detailed information, refer to these guides:
 
-- **Using Templates** - How to create new projects from leaf templates
-- **Sync Rules** - What files are synchronized and what's excluded
-- **Running Sync** - How to propagate updates from base to leaf templates
+- **[Template Hierarchy](template-hierarchy.md)** - Detailed three-tier model, decision guide, and instructions for adding new stacks
+- **Using Templates** - How to create new projects from archetype templates (coming soon)
+- **Sync Rules** - What files are synchronized and what's excluded (coming soon)
+- **Running Sync** - How to propagate updates across the hierarchy (coming soon)
 
 ---
 

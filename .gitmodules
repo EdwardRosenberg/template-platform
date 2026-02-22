@@ -1,6 +1,9 @@
 [submodule "templates/template-base"]
 	path = templates/template-base
 	url = https://github.com/EdwardRosenberg/template-base.git
+[submodule "templates/template-backend-java"]
+	path = templates/template-backend-java
+	url = https://github.com/EdwardRosenberg/template-backend-java.git
 [submodule "templates/template-backend-java-spring-boot"]
 	path = templates/template-backend-java-spring-boot
 	url = https://github.com/EdwardRosenberg/template-backend-java-spring-boot.git
