@@ -1,0 +1,219 @@
+name: Sync Templates
+
+on:
+  # Trigger manually to sync a specific template or all children
+  workflow_dispatch:
+    inputs:
+      source-repo:
+        description: 'Source template repo slug (e.g. EdwardRosenberg/template-base). Leave blank to sync all.'
+        required: false
+        default: ''
+      dry-run:
+        description: 'Dry run — detect changes but do not open PRs'
+        type: boolean
+        required: false
+        default: false
+
+  # Automatically trigger when a submodule commit is pushed to the platform
+  push:
+    branches: [main]
+    paths:
+      - 'templates/**'
+      - '.gitmodules'
+
+permissions:
+  contents: read
+
+jobs:
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 1. Read sync-config.yml from each template and build the propagation matrix
+  # ─────────────────────────────────────────────────────────────────────────────
+  build-matrix:
+    name: Build propagation matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.build.outputs.matrix }}
+    steps:
+      - name: Checkout template-platform
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Build child→parent propagation pairs
+        id: build
+        env:
+          SOURCE_REPO: ${{ inputs.source-repo }}
+        run: |
+          set -euo pipefail
+
+          PAIRS="[]"
+
+          # Walk every template submodule directory
+          for config_path in templates/*/sync-config.yml; do
+            template_dir=$(dirname "$config_path")
+            template_name=$(basename "$template_dir")
+
+            parent=$(grep '^parent:' "$config_path" | awk '{print $2}' | tr -d '"' || true)
+            tier=$(grep '^tier:' "$config_path" | awk '{print $2}' || true)
+
+            # Skip Tier 0 (no parent) and templates that don't match the source filter
+            if [ -z "$parent" ]; then
+              echo "Skipping $template_name (Tier 0, no parent)"
+              continue
+            fi
+
+            if [ -n "$SOURCE_REPO" ] && [ "$parent" != "$SOURCE_REPO" ]; then
+              echo "Skipping $template_name (parent $parent does not match filter $SOURCE_REPO)"
+              continue
+            fi
+
+            # Extract sync_paths list into a JSON array
+            sync_paths=$(python3 -c "
+import yaml, json, sys
+with open('${config_path}') as f:
+    cfg = yaml.safe_load(f)
+print(json.dumps(cfg.get('sync_paths', [])))
+")
+
+            # Derive child repo slug from submodule URL in .gitmodules
+            child_url=$(git config --file .gitmodules "submodule.${template_dir}.url" || true)
+            child_slug=$(echo "$child_url" | sed 's|https://github.com/||;s|\.git$||')
+
+            pair=$(jq -n \
+              --arg parent  "$parent" \
+              --arg child   "$child_slug" \
+              --arg tier    "$tier" \
+              --argjson paths "$sync_paths" \
+              '{parent: $parent, child: $child, tier: ($tier | tonumber), sync_paths: $paths}')
+
+            PAIRS=$(echo "$PAIRS" | jq --argjson p "$pair" '. + [$p]')
+            echo "Registered pair: $parent → $child_slug (tier $tier)"
+          done
+
+          echo "matrix={\"include\":$(echo "$PAIRS")}" >> "$GITHUB_OUTPUT"
+          echo "Propagation matrix:"
+          echo "$PAIRS" | jq .
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # 2. For each parent→child pair, compare shared paths and open a PR if changed
+  # ─────────────────────────────────────────────────────────────────────────────
+  propagate:
+    name: Propagate ${{ matrix.parent }} → ${{ matrix.child }}
+    needs: build-matrix
+    if: ${{ needs.build-matrix.outputs.matrix != '{"include":[]}' }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.build-matrix.outputs.matrix) }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout parent template
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.parent }}
+          token: ${{ secrets.SYNC_TOKEN }}
+          path: parent
+          fetch-depth: 1
+
+      - name: Checkout child template
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ matrix.child }}
+          token: ${{ secrets.SYNC_TOKEN }}
+          path: child
+          fetch-depth: 1
+
+      - name: Copy changed sync_paths from parent into child
+        id: copy
+        run: |
+          set -euo pipefail
+
+          CHANGED=false
+          CHANGED_FILES=""
+
+          # Read sync_paths from the matrix JSON
+          SYNC_PATHS='${{ toJson(matrix.sync_paths) }}'
+
+          for path in $(echo "$SYNC_PATHS" | jq -r '.[]'); do
+            src="parent/$path"
+            dst="child/$path"
+
+            if [ ! -f "$src" ]; then
+              echo "WARNING: $path does not exist in parent, skipping"
+              continue
+            fi
+
+            mkdir -p "$(dirname "$dst")"
+
+            if ! diff -q "$src" "$dst" > /dev/null 2>&1; then
+              echo "CHANGED: $path"
+              cp "$src" "$dst"
+              CHANGED=true
+              CHANGED_FILES="$CHANGED_FILES\n- $path"
+            else
+              echo "UNCHANGED: $path"
+            fi
+          done
+
+          echo "changed=$CHANGED" >> "$GITHUB_OUTPUT"
+          # Write changed file list to a temp file for the PR body step
+          printf "$CHANGED_FILES" > /tmp/changed_files.txt
+
+      - name: Skip — no changes detected
+        if: steps.copy.outputs.changed != 'true'
+        run: echo "No sync changes detected for ${{ matrix.child }}. Nothing to do."
+
+      - name: Open PR with synced changes
+        if: steps.copy.outputs.changed == 'true' && inputs.dry-run != true
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          CHILD_REPO: ${{ matrix.child }}
+          PARENT_REPO: ${{ matrix.parent }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="sync/from-$(echo "$PARENT_REPO" | tr '/' '-')-$(date +%Y%m%d%H%M%S)"
+          CHANGED_FILES=$(cat /tmp/changed_files.txt)
+
+          cd child
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          git add -A
+          git commit -m "chore: sync shared paths from $PARENT_REPO"
+          git push origin "$BRANCH"
+
+          gh pr create \
+            --repo "$CHILD_REPO" \
+            --head "$BRANCH" \
+            --base main \
+            --title "chore: sync shared paths from $PARENT_REPO" \
+            --body "## Automated Sync PR
+
+          This PR was opened automatically by the **template-platform sync workflow**.
+
+          ### Source
+          Parent template: \`$PARENT_REPO\`
+
+          ### Changed paths
+          ${CHANGED_FILES}
+
+          ### What to do
+          1. Review the diff below — these files are owned by the parent template.
+          2. Merge if the changes look correct.
+          3. Do **not** manually edit the synced files; raise changes in the parent template instead.
+
+          ---
+          *Generated by \`.github/workflows/sync-templates.yml\` in \`template-platform\`.*"
+
+      - name: Dry run summary
+        if: steps.copy.outputs.changed == 'true' && inputs.dry-run == true
+        run: |
+          echo "DRY RUN — changes detected for ${{ matrix.child }}, but no PR opened."
+          echo "Changed files:"
+          cat /tmp/changed_files.txt
+

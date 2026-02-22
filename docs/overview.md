@@ -80,11 +80,14 @@ Without sync, you face two bad options:
 
 ### How Sync Works
 
-The sync process:
-1. Detects changes in the base template's shared paths
-2. Automatically propagates those changes to all leaf templates
-3. Creates reviewable pull requests for each update
-4. Ensures changes are never destructive (only specified paths are touched)
+Sync is implemented as a GitHub Actions workflow at `.github/workflows/sync-templates.yml` in this repository. The process:
+
+1. Reads `sync-config.yml` from each template submodule to build a parent→child propagation map
+2. Detects which `sync_paths` differ between parent and child
+3. Opens a reviewable PR against each child template with only the changed files
+4. Ensures changes are never destructive — only explicitly declared paths are touched
+
+Each template declares its parent and the paths it accepts in its own `sync-config.yml`. The workflow can be triggered automatically on push or manually via `workflow_dispatch` with an optional dry-run mode.
 
 This keeps the entire ecosystem up-to-date with minimal manual effort.
 
@@ -132,9 +135,9 @@ When the style guide changes, all stack templates get updated automatically, and
 For more detailed information, refer to these guides:
 
 - **[Template Hierarchy](template-hierarchy.md)** - Detailed three-tier model, decision guide, and instructions for adding new stacks
+- **[Sync Workflow](sync-workflow.md)** - How sync works, required secrets, and how to trigger it
 - **Using Templates** - How to create new projects from archetype templates (coming soon)
-- **Sync Rules** - What files are synchronized and what's excluded (coming soon)
-- **Running Sync** - How to propagate updates across the hierarchy (coming soon)
+- **Running Sync** - Step-by-step guide for propagating updates (coming soon)
 
 ---
 
