@@ -1,0 +1,399 @@
+name: Create Project
+
+# Spin up a new project from an archetype template.
+#
+# Usage: Actions → Create Project → Run workflow
+#   - Provide a project name, template, target org, and variable overrides.
+#   - The workflow clones the template, substitutes variables, pushes to a new repo,
+#     and configures branch protection.
+
+on:
+  workflow_dispatch:
+    inputs:
+      project-name:
+        description: 'New repository name (e.g., my-awesome-service)'
+        required: true
+        type: string
+
+      template:
+        description: 'Archetype template to use'
+        required: true
+        type: choice
+        options:
+          - template-backend-java-spring-boot
+
+      target-org:
+        description: 'GitHub org or user to create the repo in (e.g., EdwardRosenberg)'
+        required: true
+        type: string
+        default: 'EdwardRosenberg'
+
+      visibility:
+        description: 'Repository visibility'
+        required: true
+        type: choice
+        options:
+          - private
+          - public
+        default: 'private'
+
+      # ── Variable overrides (JSON object) ──────────────────────────────────
+      variables:
+        description: |
+          JSON object of variable overrides. Keys must match names in template-variables.yml.
+          Example: {"groupId":"com.acme","artifactId":"my-service","basePackage":"com.acme.myservice","serviceName":"My Service"}
+        required: false
+        type: string
+        default: '{}'
+
+      # ── Branch protection ─────────────────────────────────────────────────
+      enable-branch-protection:
+        description: 'Configure branch protection on main'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  scaffold:
+    name: Scaffold ${{ inputs.project-name }}
+    runs-on: ubuntu-latest
+    steps:
+      # ────────────────────────────────────────────────────────────────────────
+      # 1. Clone the archetype template
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Clone archetype template
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          TEMPLATE: ${{ inputs.template }}
+          TARGET_ORG: ${{ inputs.target-org }}
+        run: |
+          set -euo pipefail
+          TEMPLATE_REPO="${TARGET_ORG}/${TEMPLATE}"
+          git clone "https://x-access-token:${GH_TOKEN}@github.com/${TEMPLATE_REPO}.git" project
+          cd project
+          rm -rf .git
+          echo "✅ Cloned ${TEMPLATE_REPO}"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 2. Read template-variables.yml and merge with user overrides
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Resolve variables
+        id: vars
+        env:
+          USER_VARS: ${{ inputs.variables }}
+        run: |
+          set -euo pipefail
+
+          if [ ! -f project/template-variables.yml ]; then
+            echo "⚠️  No template-variables.yml found — skipping variable substitution"
+            echo "skip_substitution=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "skip_substitution=false" >> "$GITHUB_OUTPUT"
+
+          # Merge defaults from template-variables.yml with user overrides
+          python3 - <<'PYEOF'
+          import yaml, json, os, sys
+
+          with open("project/template-variables.yml") as f:
+              config = yaml.safe_load(f)
+
+          user_vars = json.loads(os.environ.get("USER_VARS", "{}"))
+          resolved = {}
+
+          for var in config.get("variables", []):
+              name = var["name"]
+              if name in user_vars and user_vars[name]:
+                  resolved[name] = user_vars[name]
+              else:
+                  resolved[name] = var.get("default", "")
+
+          # Write resolved vars as JSON for subsequent steps
+          with open("/tmp/resolved-vars.json", "w") as f:
+              json.dump(resolved, f)
+
+          # Write substitution pairs (placeholder → value)
+          pairs = []
+          for var in config.get("variables", []):
+              name = var["name"]
+              placeholder = var.get("placeholder", var.get("default", ""))
+              value = resolved[name]
+              if placeholder and value and placeholder != value:
+                  pairs.append({"placeholder": placeholder, "value": value})
+
+          with open("/tmp/substitution-pairs.json", "w") as f:
+              json.dump(pairs, f)
+
+          # Write substitution_paths
+          sub_paths = config.get("substitution_paths", [])
+          with open("/tmp/substitution-paths.json", "w") as f:
+              json.dump(sub_paths, f)
+
+          # Write package_rename config
+          pkg_rename = config.get("package_rename", {})
+          with open("/tmp/package-rename.json", "w") as f:
+              json.dump(pkg_rename, f)
+
+          print("Resolved variables:")
+          for k, v in resolved.items():
+              print(f"  {k} = {v}")
+          PYEOF
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 3. Perform variable substitution in template files
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Substitute variables
+        if: steps.vars.outputs.skip_substitution != 'true'
+        run: |
+          set -euo pipefail
+          cd project
+
+          python3 - <<'PYEOF'
+          import json, glob, os, re
+
+          with open("/tmp/substitution-pairs.json") as f:
+              pairs = json.load(f)
+
+          with open("/tmp/substitution-paths.json") as f:
+              sub_paths = json.load(f)
+
+          with open("/tmp/resolved-vars.json") as f:
+              resolved = json.load(f)
+
+          if not pairs:
+              print("No substitutions needed (values match defaults)")
+              exit(0)
+
+          # Expand glob patterns to actual files
+          files = set()
+          for pattern in sub_paths:
+              for match in glob.glob(pattern, recursive=True):
+                  if os.path.isfile(match):
+                      files.add(match)
+
+          print(f"Substituting in {len(files)} file(s):")
+          for filepath in sorted(files):
+              with open(filepath, "r") as f:
+                  content = f.read()
+
+              original = content
+              for pair in pairs:
+                  content = content.replace(pair["placeholder"], pair["value"])
+
+              if content != original:
+                  with open(filepath, "w") as f:
+                      f.write(content)
+                  print(f"  ✅ {filepath}")
+              else:
+                  print(f"  ⏭  {filepath} (no matches)")
+          PYEOF
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 4. Rename Java package directories if needed
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Rename package directories
+        if: steps.vars.outputs.skip_substitution != 'true'
+        run: |
+          set -euo pipefail
+          cd project
+
+          python3 - <<'PYEOF'
+          import json, os, shutil
+
+          with open("/tmp/package-rename.json") as f:
+              rename_config = json.load(f)
+
+          with open("/tmp/resolved-vars.json") as f:
+              resolved = json.load(f)
+
+          if not rename_config:
+              print("No package rename configured")
+              exit(0)
+
+          from_path = rename_config.get("from", "")
+          to_template = rename_config.get("to", "")
+
+          if not from_path or not to_template:
+              print("Package rename config incomplete, skipping")
+              exit(0)
+
+          # Resolve the 'to' template — simple replacement of {{basePackage | replace('.', '/')}}
+          base_package = resolved.get("basePackage", "")
+          if not base_package or base_package == from_path.replace("/", "."):
+              print("Package unchanged, skipping rename")
+              exit(0)
+
+          to_path = base_package.replace(".", "/")
+
+          # Rename in both src/main/java and src/test/java
+          for root_dir in ["src/main/java", "src/test/java"]:
+              old_dir = os.path.join(root_dir, from_path)
+              new_dir = os.path.join(root_dir, to_path)
+
+              if not os.path.exists(old_dir):
+                  print(f"  ⏭  {old_dir} does not exist")
+                  continue
+
+              os.makedirs(os.path.dirname(new_dir), exist_ok=True)
+              shutil.move(old_dir, new_dir)
+              print(f"  ✅ {old_dir} → {new_dir}")
+
+              # Clean up empty parent directories
+              parent = os.path.dirname(old_dir)
+              while parent != root_dir:
+                  if os.path.exists(parent) and not os.listdir(parent):
+                      os.rmdir(parent)
+                      parent = os.path.dirname(parent)
+                  else:
+                      break
+          PYEOF
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 5. Clean up template-specific files that don't belong in projects
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Clean up template files
+        run: |
+          cd project
+          rm -f template-variables.yml sync-config.yml
+          echo "✅ Removed template-only files"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 6. Create the new GitHub repository and push
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Create repository and push
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+          TARGET_ORG: ${{ inputs.target-org }}
+          VISIBILITY: ${{ inputs.visibility }}
+        run: |
+          set -euo pipefail
+
+          REPO_FULL="${TARGET_ORG}/${PROJECT_NAME}"
+
+          # Create the repo via GitHub API
+          echo "Creating repository ${REPO_FULL} (${VISIBILITY})..."
+          HTTP_STATUS=$(curl -s -o /tmp/create-repo-response.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/orgs/${TARGET_ORG}/repos" \
+            -d "{
+              \"name\": \"${PROJECT_NAME}\",
+              \"visibility\": \"${VISIBILITY}\",
+              \"auto_init\": false,
+              \"has_issues\": true,
+              \"has_projects\": false,
+              \"has_wiki\": false
+            }" 2>/dev/null || true)
+
+          # If org endpoint fails (user account), try user endpoint
+          if [ "$HTTP_STATUS" != "201" ]; then
+            echo "Org endpoint returned $HTTP_STATUS, trying user endpoint..."
+            HTTP_STATUS=$(curl -s -o /tmp/create-repo-response.json -w "%{http_code}" \
+              -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/user/repos" \
+              -d "{
+                \"name\": \"${PROJECT_NAME}\",
+                \"visibility\": \"${VISIBILITY}\",
+                \"auto_init\": false,
+                \"has_issues\": true,
+                \"has_projects\": false,
+                \"has_wiki\": false
+              }")
+          fi
+
+          if [ "$HTTP_STATUS" != "201" ]; then
+            echo "❌ Failed to create repository (HTTP $HTTP_STATUS)"
+            cat /tmp/create-repo-response.json
+            exit 1
+          fi
+
+          CLONE_URL=$(cat /tmp/create-repo-response.json | python3 -c "import sys,json; print(json.load(sys.stdin)['clone_url'])")
+          echo "✅ Repository created: ${CLONE_URL}"
+
+          # Initialize git and push
+          cd project
+          git init -b main
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "feat: scaffold project from ${{ inputs.template }}
+
+          Created by template-platform create-project workflow.
+          Template: ${{ inputs.template }}
+          Variables: ${{ inputs.variables }}"
+
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${REPO_FULL}.git"
+          git push -u origin main
+
+          echo "✅ Code pushed to ${REPO_FULL}"
+          echo ""
+          echo "🎉 Project ready: https://github.com/${REPO_FULL}"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 7. Configure branch protection (optional)
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Configure branch protection
+        if: ${{ inputs.enable-branch-protection }}
+        env:
+          GH_TOKEN: ${{ secrets.SYNC_TOKEN }}
+          PROJECT_NAME: ${{ inputs.project-name }}
+          TARGET_ORG: ${{ inputs.target-org }}
+        run: |
+          set -euo pipefail
+
+          REPO_FULL="${TARGET_ORG}/${PROJECT_NAME}"
+
+          echo "Configuring branch protection for ${REPO_FULL}..."
+
+          curl -s -X PUT \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO_FULL}/branches/main/protection" \
+            -d '{
+              "required_status_checks": {
+                "strict": true,
+                "contexts": ["CI Success"]
+              },
+              "enforce_admins": false,
+              "required_pull_request_reviews": {
+                "required_approving_review_count": 1,
+                "dismiss_stale_reviews": true
+              },
+              "restrictions": null
+            }' > /dev/null
+
+          echo "✅ Branch protection configured"
+
+      # ────────────────────────────────────────────────────────────────────────
+      # 8. Summary
+      # ────────────────────────────────────────────────────────────────────────
+      - name: Summary
+        env:
+          PROJECT_NAME: ${{ inputs.project-name }}
+          TARGET_ORG: ${{ inputs.target-org }}
+          TEMPLATE: ${{ inputs.template }}
+        run: |
+          REPO_FULL="${TARGET_ORG}/${PROJECT_NAME}"
+          echo ""
+          echo "════════════════════════════════════════════════════"
+          echo "  🎉 Project Created Successfully!"
+          echo "════════════════════════════════════════════════════"
+          echo ""
+          echo "  Repository:  https://github.com/${REPO_FULL}"
+          echo "  Template:    ${TEMPLATE}"
+          echo "  Visibility:  ${{ inputs.visibility }}"
+          echo "  Protection:  ${{ inputs.enable-branch-protection }}"
+          echo ""
+          echo "  Next steps:"
+          echo "    git clone https://github.com/${REPO_FULL}.git"
+          echo "    cd ${PROJECT_NAME}"
+          echo ""
+          echo "════════════════════════════════════════════════════"
+
