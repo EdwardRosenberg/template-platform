@@ -4,21 +4,32 @@ The platform already has a solid two-tier foundation (`template-base` → `templ
 
 ---
 
-## Progress Summary (updated 2025-02-22)
+## Progress Summary (updated 2026-02-22)
 
 | Step | Status | Notes |
 |------|--------|-------|
-| 1. Clean up `.gitmodules` | ✅ Done | Stale root-level entry removed; three submodules under `templates/`. |
+| 1. Clean up `.gitmodules` | ✅ Done | Stale root-level entry removed; five submodules under `templates/`. |
 | 2. Multi-tier hierarchy | ✅ Done | `template-backend-java` (Tier 1) created; `docs/template-hierarchy.md` and `docs/overview.md` updated. |
 | 3. Sync/propagation workflow | ✅ Done | `sync-templates.yml` fully implemented (241 lines); `docs/sync-workflow.md` complete. |
 | 4. Agent delegation framework | ✅ Done | `agent-validation.yml` (283 lines), copilot instructions enhanced with Agent Delegation section, CODEOWNERS configured. |
-| 5. Project scaffolding (`spin-up`) | ❌ Not started | No `create-project.yml` or `template-variables.yml` exists. |
-| 6. Expand template catalog | ❌ Not started | Only the Java stack exists. No second stack template. |
+| 5. Project scaffolding (`spin-up`) | ✅ Done | `create-project.yml` workflow created; `template-variables.yml` added to both archetype templates. |
+| 6. Expand template catalog | ✅ Done | Python stack added: `template-backend-python` (Tier 1) + `template-backend-python-fastapi` (Tier 2). |
 
-### Open Gaps in Completed Steps
+### PRs Pending Review
 
-- **`template-backend-java-spring-boot` is missing `sync-config.yml`** — The Tier 2 archetype has no sync manifest, so the sync workflow cannot propagate changes from `template-backend-java` down to it. A `sync-config.yml` declaring `parent: EdwardRosenberg/template-backend-java` and appropriate `sync_paths` must be added (via PR to the Spring Boot template repo).
-- **`agent-validation.yml` not in Tier 1 sync_paths** — `template-base/sync-config.yml` lists `agent-validation.yml` but `template-backend-java/sync-config.yml` does not include it. This means the agent-validation workflow will not auto-propagate from base → Tier 1 children unless the Tier 1 sync_paths are updated, or the approach is intentional (Tier 1 templates call the reusable workflow from `template-base@main` directly instead of copying the file).
+The following branches have been pushed and need PRs created/merged:
+
+| Repo | Branch | Change |
+|------|--------|--------|
+| `template-backend-java-spring-boot` | `template-sync-gap-fix` | Adds `sync-config.yml` (Tier 2 sync chain) + `template-variables.yml` |
+| `template-backend-java` | `template-sync-gap-fix` | Adds children list + `agent-validation.yml` to `sync_paths` |
+| `template-base` | `add-python-stack` | Adds `template-backend-python` to children list |
+| `template-platform` | `template-sync-gap-fix` | Adds `create-project.yml`, Python submodules, updated plan |
+
+### Resolved Gaps
+
+- ~~**`template-backend-java-spring-boot` missing `sync-config.yml`**~~ — Added via branch `template-sync-gap-fix`.
+- ~~**`agent-validation.yml` not in Tier 1 sync_paths**~~ — Added to `template-backend-java/sync-config.yml` via branch `template-sync-gap-fix`.
 - **Decisions resolved** — Agent identity: settled on `github-actions[bot]` + `Co-authored-by` trailers. Sync strategy: Actions + file-copy (no Copier). Hierarchy depth: capped at three tiers.
 
 ---
@@ -74,49 +85,43 @@ Create a `.github/workflows/create-project.yml` (workflow_dispatch) at the platf
 - Configures branch protection, required status checks, and CODEOWNERS automatically.
 - Outputs a ready-to-clone repo URL with CI already green.
 
-**Status:** Not started.
-
-**Pre-requisites before implementation:**
-1. Add `template-variables.yml` to each archetype template (Tier 2) defining the variables that must be substituted (e.g., `groupId`, `artifactId`, `serviceName`, `packageName`).
-2. Add `sync-config.yml` to `template-backend-java-spring-boot` first (gap from step 2/3).
-3. Decide whether to use GitHub's "Use this template" API or clone + re-init approach. GitHub's template API is simpler but does not support variable substitution — recommend clone + find-replace + push.
+**Status:** Complete. `create-project.yml` (290+ lines) in `template-platform` with 8 steps: clone archetype, resolve variables, substitute placeholders, rename Java/Python package directories, clean up template files, create GitHub repo via API, push code, and configure branch protection. Supports `template-backend-java-spring-boot` and `template-backend-python-fastapi` as template choices. `template-variables.yml` added to both archetype templates defining substitution variables, paths, and package rename rules. Uses clone + find-replace + push approach (not GitHub template API) to support variable substitution.
 
 ### 6. Expand the template catalog with at least one more stack
 
 Add a second stack (e.g., `template-frontend-react` → `template-frontend-react-nextjs`, or `template-backend-python` → `template-backend-python-fastapi`) as submodules under `templates/` to validate that the hierarchy, sync, and agent-validation patterns work across different stacks.
 
-**Status:** Not started.
-
-**Recommended next stack:** `template-backend-python` (Tier 1) + `template-backend-python-fastapi` (Tier 2). Python is the second most common backend stack and validates the multi-language support in `agent-validation.yml` (which already has `tech-stack: python` support). Alternatively, a frontend stack (`template-frontend-react`) would validate cross-ecosystem support more broadly.
+**Status:** Complete. Python stack added as a second ecosystem:
+- **`template-backend-python`** (Tier 1): `pyproject.toml` with ruff + mypy + pytest config, `.python-version`, CI calling base with `backend-tech-stack: python`, `dependabot.yml` for pip ecosystem, `sync-config.yml` declaring `template-base` as parent.
+- **`template-backend-python-fastapi`** (Tier 2): FastAPI hello-world app with `/` and `/health` endpoints, Swagger/ReDoc auto-docs, async test suite using `httpx` + `pytest-asyncio`, `template-variables.yml` for scaffolding, `sync-config.yml` declaring `template-backend-python` as parent.
+- Both repos created on GitHub, pushed, and added as submodules in `template-platform`.
+- `template-base/sync-config.yml` updated (branch `add-python-stack`) to list `template-backend-python` as a child.
 
 ---
 
-## Recommended Next Actions (in priority order)
+## Completed Actions
 
-### A. Fix the `template-backend-java-spring-boot` sync gap (small, high-impact)
-Add a `sync-config.yml` to the `template-backend-java-spring-boot` repo declaring:
-```yaml
-parent: EdwardRosenberg/template-backend-java
-tier: 2
-sync_paths:
-  - .github/workflows/ci.yml
-  - .github/workflows/pr-title-lint.yml
-  - .github/copilot-instructions.md
-  - .github/PULL_REQUEST_TEMPLATE.md
-  - .github/ISSUE_TEMPLATE/bug.yml
-  - .github/ISSUE_TEMPLATE/feature.yml
-  - .github/ISSUE_TEMPLATE/chore.yml
-  - .editorconfig
-  - .gitignore
-  - checkstyle.xml
-```
-This completes the end-to-end sync chain (base → java → spring-boot) and is required before step 5 can work correctly.
+### A. ✅ Fixed `template-backend-java-spring-boot` sync gap
+- Added `sync-config.yml` declaring Tier 2 parent and sync_paths.
+- Added `template-variables.yml` for project scaffolding.
+- Branch `template-sync-gap-fix` pushed, awaiting PR merge.
 
-### B. Implement step 5 — project scaffolding workflow
-This is the highest-value remaining step. It turns the platform from a "documentation + CI" system into an active project creation tool.
+### B. ✅ Implemented project scaffolding workflow
+- `create-project.yml` in `template-platform` with clone → substitute → push flow.
+- Supports both Java Spring Boot and Python FastAPI archetypes.
 
-### C. Implement step 6 — second stack template
-Validates extensibility. Can be done in parallel with step 5 if desired.
+### C. ✅ Added second stack (Python/FastAPI)
+- `template-backend-python` (Tier 1) and `template-backend-python-fastapi` (Tier 2) created.
+- Both repos pushed to GitHub and registered as submodules.
+
+---
+
+## Future Improvements (not in original plan)
+
+1. **Frontend stack** — Add `template-frontend-react` (Tier 1) + `template-frontend-react-nextjs` (Tier 2) to cover frontend ecosystem.
+2. **Automated CI validation on new projects** — Trigger CI on the newly created repo after scaffolding to verify green build.
+3. **Template catalog discovery** — Add a `templates.json` manifest at the platform level listing all available archetypes with metadata (description, stack, variables).
+4. **Copier/Cookiecutter integration** — If variable substitution needs grow beyond simple find-replace (conditional files, loops), evaluate Copier as a templating engine.
 
 ---
 

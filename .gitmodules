@@ -7,3 +7,9 @@
 [submodule "templates/template-backend-java-spring-boot"]
 	path = templates/template-backend-java-spring-boot
 	url = https://github.com/EdwardRosenberg/template-backend-java-spring-boot.git
+[submodule "templates/template-backend-python"]
+	path = templates/template-backend-python
+	url = https://github.com/EdwardRosenberg/template-backend-python.git
+[submodule "templates/template-backend-python-fastapi"]
+	path = templates/template-backend-python-fastapi
+	url = https://github.com/EdwardRosenberg/template-backend-python-fastapi.git

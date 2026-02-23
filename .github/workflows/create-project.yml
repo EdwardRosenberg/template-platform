@@ -21,6 +21,7 @@ on:
         type: choice
         options:
           - template-backend-java-spring-boot
+          - template-backend-python-fastapi
 
       target-org:
         description: 'GitHub org or user to create the repo in (e.g., EdwardRosenberg)'
