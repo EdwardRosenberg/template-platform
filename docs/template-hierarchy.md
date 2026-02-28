@@ -10,11 +10,11 @@ Tier 0 — template-base
     ├── Tier 1 — template-backend-java          (stack template)
     │       └── Tier 2 — template-backend-java-spring-boot   (archetype template)
     │
-    ├── Tier 1 — template-frontend-react        (stack template, planned)
-    │       └── Tier 2 — template-frontend-react-nextjs      (archetype template, planned)
+    ├── Tier 1 — template-backend-python        (stack template)
+    │       └── Tier 2 — template-backend-python-fastapi     (archetype template)
     │
-    └── Tier 1 — template-data-python           (stack template, planned)
-            └── Tier 2 — template-data-python-fastapi        (archetype template, planned)
+    └── Tier 1 — template-frontend-react        (stack template, planned)
+            └── Tier 2 — template-frontend-react-nextjs      (archetype template, planned)
 ```
 
 ---
@@ -58,8 +58,8 @@ Stack templates inherit everything from `template-base` and layer on the tooling
 | Template | Stack | Adds |
 |---|---|---|
 | `template-backend-java` | Java (any framework) | Maven wrapper, Java `.gitignore` additions, `ci.yml` calling base with `backend-tech-stack: java`, Checkstyle config |
-| `template-frontend-react` | React / TypeScript | Node.js `.nvmrc`, `package.json` scaffold, ESLint + Prettier configs, `ci.yml` calling base with `frontend-tech-stack: node` |
-| `template-data-python` | Python | `pyproject.toml`, `ruff` / `mypy` config, pytest setup, `ci.yml` calling base with `backend-tech-stack: python` |
+| `template-backend-python` | Python (any framework) | `pyproject.toml`, `ruff` / `mypy` config, pytest setup, `ci.yml` calling base with `backend-tech-stack: python` |
+| `template-frontend-react` | React / TypeScript (planned) | Node.js `.nvmrc`, `package.json` scaffold, ESLint + Prettier configs, `ci.yml` calling base with `frontend-tech-stack: node` |
 
 ### What belongs here
 - Build system configuration (Maven `pom.xml` parent, `package.json` scripts, `pyproject.toml`)
@@ -90,8 +90,8 @@ Archetype templates inherit from a Tier 1 stack template and add the framework-s
 | Template | Parent Stack Template | Adds |
 |---|---|---|
 | `template-backend-java-spring-boot` | `template-backend-java` | Spring Boot parent POM, `HelloWorldController`, `application.properties`, Springdoc/Swagger setup |
-| `template-frontend-react-nextjs` | `template-frontend-react` | Next.js app scaffold, Tailwind config, example page and layout |
-| `template-data-python-fastapi` | `template-data-python` | FastAPI app scaffold, example router, `uvicorn` configuration |
+| `template-backend-python-fastapi` | `template-backend-python` | FastAPI app scaffold, example router, `uvicorn` configuration |
+| `template-frontend-react-nextjs` | `template-frontend-react` (planned) | Next.js app scaffold, Tailwind config, example page and layout |
 
 ### What belongs here
 - A minimal but runnable application (`HelloWorld`-style)
@@ -112,8 +112,8 @@ Each tier propagates changes **downward** to its direct children only. The sync 
 ### Propagation example
 
 1. A new reusable workflow is added to `template-base`.
-2. The sync workflow opens a PR against `template-backend-java` (Tier 1 child).
-3. Once merged, the sync workflow opens a PR against `template-backend-java-spring-boot` (Tier 2 child of `template-backend-java`).
+2. The sync workflow opens a PR against `template-backend-java` and `template-backend-python` (Tier 1 children).
+3. Once merged, the sync workflow opens a PR against `template-backend-java-spring-boot` and `template-backend-python-fastapi` (Tier 2 children).
 
 This staged propagation keeps each tier responsible for reviewing only what changed at its level.
 
