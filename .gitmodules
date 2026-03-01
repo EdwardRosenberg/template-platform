@@ -13,3 +13,6 @@
 [submodule "templates/template-backend-python-fastapi"]
 	path = templates/template-backend-python-fastapi
 	url = https://github.com/EdwardRosenberg/template-backend-python-fastapi.git
+[submodule "templates/template-desktop-electron"]
+	path = templates/template-desktop-electron
+	url = https://github.com/EdwardRosenberg/template-desktop-electron.git

@@ -13,6 +13,8 @@ Tier 0 — template-base
     ├── Tier 1 — template-backend-python        (stack template)
     │       └── Tier 2 — template-backend-python-fastapi     (archetype template)
     │
+    ├── Tier 2 — template-desktop-electron      (archetype template, Windows)
+    │
     └── Tier 1 — template-frontend-react        (stack template, planned)
             └── Tier 2 — template-frontend-react-nextjs      (archetype template, planned)
 ```
@@ -91,6 +93,7 @@ Archetype templates inherit from a Tier 1 stack template and add the framework-s
 |---|---|---|
 | `template-backend-java-spring-boot` | `template-backend-java` | Spring Boot parent POM, `HelloWorldController`, `application.properties`, Springdoc/Swagger setup |
 | `template-backend-python-fastapi` | `template-backend-python` | FastAPI app scaffold, example router, `uvicorn` configuration |
+| `template-desktop-electron` | `template-base` | Electron main/preload/renderer scaffold, electron-builder Windows packaging, Vitest tests |
 | `template-frontend-react-nextjs` | `template-frontend-react` (planned) | Next.js app scaffold, Tailwind config, example page and layout |
 
 ### What belongs here
